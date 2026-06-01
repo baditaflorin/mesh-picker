@@ -28,6 +28,51 @@ A **rootless-computing** peer-to-peer browser app. No backend of its own beyond 
 
 Read the principles → **https://baditaflorin.github.io/rootless-computing/principles.html**
 
+## How to play
+
+The utility every group reaches for — no app store, no accounts, no "let me just
+flip a coin." One person opens the link; everyone else scans the room QR (⚙ →
+invite) or opens the same link. Type a name, and you're in.
+
+1. **Everyone joins.** Presence is live — the lobby shows who's here.
+2. **Pick a mode.** The choice is shared, so the whole room sees the same screen:
+   - **🟢 Teams** — split everyone into 2–6 balanced teams. Players are shuffled
+     and dealt round-robin, so team sizes differ by at most one.
+   - **🔢 Turn order** — a random running order for the room (who's up first?).
+   - **🎁 Secret Santa** — a private gift pairing. Each phone shows **only** "🎁
+     You give to: \<name\>"; no phone reveals anyone else's giftee, and nobody is
+     ever assigned themselves. (≥3 players.)
+   - **🎯 Pick one** — crown a single random winner, with a big reveal.
+3. **Draw.** Every phone contributes a pinch of randomness; once the seed is
+   locked, hit **Draw** and the result appears — _identical on every screen_.
+4. **Reroll** any time to get a fresh, equally-fair draw — it bumps your salt and
+   re-derives for everyone.
+
+## Why it's fair
+
+The whole point of mesh-picker is that **nobody can rig the draw** — not a
+player, not the person who opened the link, and not a server (there isn't one).
+It uses the same **commit-reveal** trust-minimization as
+[mesh-mafia](https://baditaflorin.github.io/mesh-mafia/)'s role dealing:
+
+- Every phone independently generates a random salt and publishes it to a shared
+  Yjs map. No single phone supplies "the" randomness.
+- The shared seed is the **XOR-combine of all salts** (`combineSalts`). To bias
+  the outcome in your favor you'd have to predict and counter the _combined_
+  entropy of every other phone — which you can't, because your salt is fixed once
+  contributed and theirs are independent.
+- Every phone then runs the **same deterministic algorithm** (a seeded
+  Fisher-Yates shuffle, mulberry32) on the same seed, so all phones compute the
+  _same_ teams / order / pairing without trusting each other or any coordinator.
+- **Reroll** simply contributes a fresh salt and shifts the seed for everyone —
+  it's another fair draw, not a do-over you control.
+
+For Secret Santa specifically, the pairing is a **derangement** — a permutation
+with no fixed points — constructed as a single cycle over the seeded shuffle, so
+it is mathematically impossible for anyone to draw their own name. The full
+mapping is computable from the public seed, but each phone deliberately renders
+only its own giftee so the surprise survives.
+
 ## Quickstart
 
 Open the live URL on two devices in the same room (set in ⚙ settings, or scan the room QR). Everything else is in-app.
