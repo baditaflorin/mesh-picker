@@ -61,7 +61,14 @@ export function Feature({ room, config }: Props) {
   const roster = useRoster(room);
   const phase = usePhase<Stage>(room, "pick:phase", "setup");
   const cfg = usePickConfig(room);
-  const rng = useFairRng(room, "pick:rng", { minContributors: 1 });
+  const peerIds = roster.present.length ? roster.present : room ? [room.peerId] : [];
+  // The seed's quorum: prefer the player list frozen at Draw time (see
+  // `lockPlayers` above) so a peer joining mid-round can't block the
+  // already-locked round's quorum forever; fall back to the live roster
+  // before a draw has happened.
+  const rngPeerIds =
+    cfg.playersSnapshot && cfg.playersSnapshot.length > 0 ? cfg.playersSnapshot : peerIds;
+  const rng = useFairRng(room, "pick:rng", { peerIds: rngPeerIds, minContributors: 1 });
   const { burst } = useConfetti();
 
   // Big confetti when a single winner is crowned.
@@ -80,7 +87,7 @@ export function Feature({ room, config }: Props) {
     );
   }
 
-  const present = roster.present.length ? roster.present : [room.peerId];
+  const present = peerIds;
   const nameFor = (id: string) =>
     names[id] || (id === room.peerId ? myName : `peer-${id.slice(0, 4)}`);
   const players = present.map(nameFor);
@@ -206,20 +213,25 @@ export function Feature({ room, config }: Props) {
     <button
       type="button"
       className="pk-reroll"
-      onClick={() => rng.rerollMine()}
-      title="Bump your salt for a fresh, equally-fair draw"
+      onClick={() => rng.rerollRound()}
+      title="Restart the draw for the whole room — everyone blind-commits fresh randomness again"
     >
       🔁 Reroll
     </button>
   );
 
-  // The seed gates the reveal; until it's ready we can't draw fairly.
+  // The seed gates the reveal; until every present phone has committed AND
+  // revealed (and each reveal verifies against its earlier commitment), we
+  // can't show a trustworthy result.
   if (!rng.ready || rng.seed === null || !cfg.mode) {
     return (
       <div className="pk-wrap pk-stage-reveal">
         <ConfettiLayer />
         <h1 className="pk-title">Gathering the fair seed…</h1>
-        <p className="pk-status">Waiting for at least one phone to contribute entropy.</p>
+        <p className="pk-status">
+          Waiting for every phone in the room ({rng.contributors}/{rngPeerIds.length}) to commit
+          and reveal a pinch of randomness.
+        </p>
         {back}
       </div>
     );
