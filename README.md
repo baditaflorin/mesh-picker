@@ -67,23 +67,6 @@ it is mathematically impossible for anyone to draw their own name. The full
 mapping is computable from the public seed, but each phone deliberately renders
 only its own giftee so the surprise survives.
 
-### Limitations (traced from source, not a full commit-reveal scheme)
-
-Unlike [mesh-mafia](https://baditaflorin.github.io/mesh-mafia/)'s role dealing,
-`useFairRng` (in `mesh-common`) does **not** use this repo's own
-`commit()`/`verifyReveal()` SHA-256 commit-reveal primitives — it writes each
-phone's raw salt straight to the shared Yjs map with no earlier hash
-commitment. Because Yjs syncs live, every peer can watch everyone else's salts
-arrive in real time before deciding whether to (re)contribute their own. A
-peer willing to wait until last, or to hit **Reroll** repeatedly while
-watching their own screen for a result they like, can steer the draw in a way
-a true commit-then-reveal protocol would prevent. This doesn't let anyone
-_force_ a specific outcome for someone else's screen (the seed is still a
-deterministic function of the salts, and every phone converges on the same
-result), but it does mean the draw is not rig-proof against a patient or
-motivated participant. Treat mesh-picker as "no single phone secretly
-controls the draw," not as a cryptographically-binding fair-RNG protocol.
-
 ## Quickstart
 
 Open the live URL on two devices in the same room (set in ⚙ settings, or scan the room QR). Everything else is in-app.
