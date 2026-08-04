@@ -36,13 +36,24 @@ function usePickConfig(room: YRoom | null) {
   }, [room]);
 
   const m = room ? room.doc.getMap(CFG_KEY) : null;
-  const mode = (m?.get("mode") as PickMode | undefined) ?? null;
+  // `mode` is shared, untrusted CRDT state: any peer (or a future bug) can
+  // write an arbitrary string here directly via the Yjs doc, bypassing the
+  // mode buttons entirely. Validate against MODE_IDS before trusting it as a
+  // PickMode — an unrecognized value falls back to "no mode chosen" instead
+  // of crashing every peer's render when it's used to index MODE_META below.
+  const rawMode = m?.get("mode") as PickMode | undefined;
+  const mode = rawMode && (MODE_IDS as string[]).includes(rawMode) ? rawMode : null;
   const teamCount = (m?.get("teamCount") as number | undefined) ?? 2;
+  // Player list frozen at Draw time (see `lockPlayers`) — peerIds in the
+  // exact order every phone should use for this round's shuffle/derangement,
+  // so the reveal never recomputes over a roster that has since drifted.
+  const playersSnapshot = (m?.get("playersSnapshot") as string[] | undefined) ?? null;
 
   const setMode = (next: PickMode) => m?.set("mode", next);
   const setTeamCount = (n: number) => m?.set("teamCount", n);
+  const lockPlayers = (peerIds: readonly string[]) => m?.set("playersSnapshot", [...peerIds]);
 
-  return { mode, teamCount, setMode, setTeamCount };
+  return { mode, teamCount, playersSnapshot, setMode, setTeamCount, lockPlayers };
 }
 
 export function Feature({ room, config }: Props) {
@@ -84,9 +95,9 @@ export function Feature({ room, config }: Props) {
         <ConfettiLayer />
         <h1 className="pk-title">🎲 mesh-picker</h1>
         <p className="pk-tagline">
-          The provably-fair draw the whole group trusts. Everyone opens this page; each phone throws
-          in a pinch of randomness; the result is derived from the shared seed — identical on every
-          screen, riggable by nobody.
+          The draw the whole group trusts. Everyone opens this page; each phone throws in a pinch of
+          randomness; the result is derived from the shared seed — identical on every screen, with
+          no single phone secretly picking the winner.
         </p>
 
         {!name.trim() && (
@@ -163,7 +174,20 @@ export function Feature({ room, config }: Props) {
             type="button"
             className="pk-primary"
             disabled={!cfg.mode || !rng.ready || (cfg.mode === "santa" && santaTooFew)}
-            onClick={() => phase.transition("reveal")}
+            onClick={() =>
+              // Freeze *who's playing* in the same Yjs transaction as the
+              // phase flip, so every peer's reveal is computed over one
+              // network-synced player list instead of each peer's own live
+              // `roster.present` (which can transiently disagree across
+              // peers — differing WebRTC propagation delay, clock skew in
+              // the presence freshness window, a peer joining mid-draw —
+              // and would otherwise let two phones compute different
+              // teams/order/winner from the identical seed).
+              room.doc.transact(() => {
+                cfg.lockPlayers(present);
+                phase.transition("reveal");
+              })
+            }
           >
             {cfg.mode ? `Draw — ${MODE_META[cfg.mode].label}` : "Pick a mode first"}
           </button>
@@ -213,11 +237,19 @@ export function Feature({ room, config }: Props) {
     </div>
   );
 
+  // Every peer must draw over the *same* player list. Prefer the snapshot
+  // frozen at Draw time (see `lockPlayers` above); only fall back to the
+  // live roster for the brief window before that snapshot has synced in
+  // (e.g. a peer that connects right as reveal starts).
+  const revealPresent =
+    cfg.playersSnapshot && cfg.playersSnapshot.length > 0 ? cfg.playersSnapshot : present;
+  const revealPlayers = revealPresent.map(nameFor);
+
   let body: React.ReactNode = null;
 
   if (cfg.mode === "teams") {
-    const n = clampTeams(cfg.teamCount, players.length);
-    const teams = splitIntoTeams(players, n, rng.shuffle);
+    const n = clampTeams(cfg.teamCount, revealPlayers.length);
+    const teams = splitIntoTeams(revealPlayers, n, rng.shuffle);
     body = (
       <div className="pk-teams">
         {teams.map((team, i) => (
@@ -233,7 +265,7 @@ export function Feature({ room, config }: Props) {
       </div>
     );
   } else if (cfg.mode === "order") {
-    const order = runningOrder(players, rng.shuffle);
+    const order = runningOrder(revealPlayers, rng.shuffle);
     body = (
       <ol className="pk-order">
         {order.map((p, i) => (
@@ -245,11 +277,11 @@ export function Feature({ room, config }: Props) {
       </ol>
     );
   } else if (cfg.mode === "santa") {
-    // Derangement over the present player list (sorted by peerId via the
-    // roster) so every phone builds the identical mapping; each phone then
-    // reveals ONLY its own giftee.
-    const assignment = derangement(players, rng.seed);
-    const myIdx = present.indexOf(room.peerId);
+    // Derangement over the frozen player list (sorted by peerId, snapshotted
+    // at Draw time) so every phone builds the identical mapping; each phone
+    // then reveals ONLY its own giftee.
+    const assignment = derangement(revealPlayers, rng.seed);
+    const myIdx = revealPresent.indexOf(room.peerId);
     const giveTo = myIdx >= 0 ? assignment[myIdx] : undefined;
     body = (
       <div className="pk-santa">
@@ -267,7 +299,7 @@ export function Feature({ room, config }: Props) {
       </div>
     );
   } else {
-    const winner = rng.pick(players);
+    const winner = rng.pick(revealPlayers);
     body = (
       <div className="pk-winner">
         <div className="pk-winner-emoji">🎯</div>

@@ -50,28 +50,39 @@ invite) or opens the same link. Type a name, and you're in.
 
 ## Why it's fair
 
-The whole point of mesh-picker is that **nobody can rig the draw** — not a
-player, not the person who opened the link, and not a server (there isn't one).
-It uses the same **commit-reveal** trust-minimization as
-[mesh-mafia](https://baditaflorin.github.io/mesh-mafia/)'s role dealing:
+mesh-picker makes it hard for any _one_ phone to unilaterally pick the
+result:
 
 - Every phone independently generates a random salt and publishes it to a shared
   Yjs map. No single phone supplies "the" randomness.
-- The shared seed is the **XOR-combine of all salts** (`combineSalts`). To bias
-  the outcome in your favor you'd have to predict and counter the _combined_
-  entropy of every other phone — which you can't, because your salt is fixed once
-  contributed and theirs are independent.
+- The shared seed is the **XOR-combine of all salts** (`combineSalts`) — order-
+  independent, so it doesn't matter which phone's salt syncs first.
 - Every phone then runs the **same deterministic algorithm** (a seeded
   Fisher-Yates shuffle, mulberry32) on the same seed, so all phones compute the
   _same_ teams / order / pairing without trusting each other or any coordinator.
-- **Reroll** simply contributes a fresh salt and shifts the seed for everyone —
-  it's another fair draw, not a do-over you control.
 
 For Secret Santa specifically, the pairing is a **derangement** — a permutation
 with no fixed points — constructed as a single cycle over the seeded shuffle, so
 it is mathematically impossible for anyone to draw their own name. The full
 mapping is computable from the public seed, but each phone deliberately renders
 only its own giftee so the surprise survives.
+
+### Limitations (traced from source, not a full commit-reveal scheme)
+
+Unlike [mesh-mafia](https://baditaflorin.github.io/mesh-mafia/)'s role dealing,
+`useFairRng` (in `mesh-common`) does **not** use this repo's own
+`commit()`/`verifyReveal()` SHA-256 commit-reveal primitives — it writes each
+phone's raw salt straight to the shared Yjs map with no earlier hash
+commitment. Because Yjs syncs live, every peer can watch everyone else's salts
+arrive in real time before deciding whether to (re)contribute their own. A
+peer willing to wait until last, or to hit **Reroll** repeatedly while
+watching their own screen for a result they like, can steer the draw in a way
+a true commit-then-reveal protocol would prevent. This doesn't let anyone
+_force_ a specific outcome for someone else's screen (the seed is still a
+deterministic function of the salts, and every phone converges on the same
+result), but it does mean the draw is not rig-proof against a patient or
+motivated participant. Treat mesh-picker as "no single phone secretly
+controls the draw," not as a cryptographically-binding fair-RNG protocol.
 
 ## Quickstart
 
