@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { render, within } from "@testing-library/react";
+import { render, waitFor, within } from "@testing-library/react";
 import { createMockRoom, linkMockRooms } from "@baditaflorin/mesh-common/testing";
+import { commit } from "@baditaflorin/mesh-common";
 import { Feature } from "../../src/Feature";
 import { config } from "../../src/config";
 
@@ -8,6 +9,21 @@ import { config } from "../../src/config";
 // merely out-of-sync peer would, rather than going through the UI — that's
 // exactly the class of bug this file guards against (malformed/unexpected
 // state arriving over the mesh, not just state the local UI would produce).
+
+/**
+ * Seeds a peer's already-committed-and-revealed entry for useFairRng's round
+ * 0, the same shape `useCommitRevealHook` would publish for a real peer.
+ */
+async function seedFairRngReveal(
+  room: ReturnType<typeof createMockRoom>,
+  key: string,
+  peerId: string,
+  payload: string,
+) {
+  const c = await commit(JSON.stringify(payload));
+  room.doc.getMap(`${key}:0:commits`).set(peerId, c.hash);
+  room.doc.getMap(`${key}:0:reveals`).set(peerId, { salt: c.salt, payload });
+}
 
 describe("Feature — malformed shared `mode` doesn't crash the render", () => {
   it("falls back to the seed-gathering screen instead of throwing when pick:cfg.mode is garbage", () => {
@@ -18,7 +34,6 @@ describe("Feature — malformed shared `mode` doesn't crash the render", () => {
     room.doc.getMap("pick:cfg").set("mode", "not-a-real-mode");
     room.doc.getMap("pick:phase").set("phase", "reveal");
     room.doc.getMap("pick:phase").set("epoch", 1);
-    room.doc.getMap("pick:rng").set(room.peerId, "aa".repeat(16));
 
     let container: HTMLElement | undefined;
     expect(() => {
@@ -30,7 +45,7 @@ describe("Feature — malformed shared `mode` doesn't crash the render", () => {
 });
 
 describe("Feature — reveal draws over a frozen player snapshot, not the live roster", () => {
-  it("both peers render the identical winner even when their local rosters momentarily disagree", () => {
+  it("both peers render the identical winner even when their local rosters momentarily disagree", async () => {
     const a = createMockRoom({ peerId: "peer-a" });
     const b = createMockRoom({ peerId: "peer-b" });
     const unlink = linkMockRooms(a, b);
@@ -41,9 +56,11 @@ describe("Feature — reveal draws over a frozen player snapshot, not the live r
     a.doc.getMap("__mesh_roster").set(a.peerId, Date.now());
     b.doc.getMap("__mesh_roster").set(b.peerId, Date.now());
 
-    // Fair-seed salts from both peers, synced.
-    a.doc.getMap("pick:rng").set(a.peerId, "11".repeat(16));
-    b.doc.getMap("pick:rng").set(b.peerId, "22".repeat(16));
+    // Both peers already committed + revealed a verified salt for round 0 —
+    // the state useFairRng would have reached after a real commit-reveal
+    // round, so the seed is ready as soon as the component mounts.
+    await seedFairRngReveal(a, "pick:rng", a.peerId, "11".repeat(16));
+    await seedFairRngReveal(a, "pick:rng", b.peerId, "22".repeat(16));
 
     // Peer A picks "Pick one" and hits Draw — exactly what the onClick
     // handler in Feature.tsx does: freeze the player list and flip the
@@ -64,10 +81,16 @@ describe("Feature — reveal draws over a frozen player snapshot, not the live r
     b.doc.getMap("__mesh_roster").set("peer-c", Date.now());
 
     const renderedA = render(<Feature room={a} config={config} />);
+    await waitFor(() =>
+      expect(within(renderedA.container).getByText(/is the pick\./i)).toBeInTheDocument(),
+    );
     const winnerA = within(renderedA.container).getByText(/is the pick\./i).previousElementSibling
       ?.textContent;
 
     const renderedB = render(<Feature room={b} config={config} />);
+    await waitFor(() =>
+      expect(within(renderedB.container).getByText(/is the pick\./i)).toBeInTheDocument(),
+    );
     const winnerB = within(renderedB.container).getByText(/is the pick\./i).previousElementSibling
       ?.textContent;
 

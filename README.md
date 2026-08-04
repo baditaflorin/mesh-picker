@@ -43,46 +43,46 @@ invite) or opens the same link. Type a name, and you're in.
      You give to: \<name\>"; no phone reveals anyone else's giftee, and nobody is
      ever assigned themselves. (≥3 players.)
    - **🎯 Pick one** — crown a single random winner, with a big reveal.
-3. **Draw.** Every phone contributes a pinch of randomness; once the seed is
-   locked, hit **Draw** and the result appears — _identical on every screen_.
-4. **Reroll** any time to get a fresh, equally-fair draw — it bumps your salt and
-   re-derives for everyone.
+3. **Draw.** Every phone blind-commits a pinch of randomness; once everyone
+   present has committed _and_ revealed, the seed locks and hitting **Draw**
+   shows the result — _identical on every screen_.
+4. **Reroll** any time to restart the draw for the whole room with a fresh
+   blind round — not a private do-over of just your own contribution.
 
 ## Why it's fair
 
-mesh-picker makes it hard for any _one_ phone to unilaterally pick the
-result:
+The whole point of mesh-picker is that **nobody can rig the draw** — not a
+player, not the person who opened the link, and not a server (there isn't one).
+It uses the same **commit-reveal** trust-minimization as
+[mesh-mafia](https://baditaflorin.github.io/mesh-mafia/)'s role dealing, via
+`useFairRng` in `mesh-common`:
 
-- Every phone independently generates a random salt and publishes it to a shared
-  Yjs map. No single phone supplies "the" randomness.
-- The shared seed is the **XOR-combine of all salts** (`combineSalts`) — order-
-  independent, so it doesn't matter which phone's salt syncs first.
+- Every phone first publishes only the **SHA-256 hash** of a random salt (a
+  commitment) — not the salt itself. No phone can see anyone else's actual
+  randomness yet.
+- Only once **every phone currently in the room** has committed does anyone
+  reveal their raw salt. A phone that hasn't committed yet can't peek at
+  others' salts first and steer its own contribution to bias the result.
+- Each revealed salt is verified against its earlier commitment
+  (`verifyReveal`) before it's allowed to count; a reveal that doesn't match
+  is silently dropped rather than combined.
+- The shared seed is the **XOR-combine of all verified salts**
+  (`combineSalts`). Because every salt was committed before any were
+  revealed, nobody — including a phone that waits to reveal last — can choose
+  a salt to steer the combined seed toward an outcome they want.
 - Every phone then runs the **same deterministic algorithm** (a seeded
   Fisher-Yates shuffle, mulberry32) on the same seed, so all phones compute the
   _same_ teams / order / pairing without trusting each other or any coordinator.
+- **Reroll** starts a brand-new blind round for the whole room (fresh
+  commitments required from everyone) rather than letting one phone swap out
+  just its own already-revealed salt — so nobody can spam-reroll while
+  watching their own screen for a result they like.
 
 For Secret Santa specifically, the pairing is a **derangement** — a permutation
 with no fixed points — constructed as a single cycle over the seeded shuffle, so
 it is mathematically impossible for anyone to draw their own name. The full
 mapping is computable from the public seed, but each phone deliberately renders
 only its own giftee so the surprise survives.
-
-### Limitations (traced from source, not a full commit-reveal scheme)
-
-Unlike [mesh-mafia](https://baditaflorin.github.io/mesh-mafia/)'s role dealing,
-`useFairRng` (in `mesh-common`) does **not** use this repo's own
-`commit()`/`verifyReveal()` SHA-256 commit-reveal primitives — it writes each
-phone's raw salt straight to the shared Yjs map with no earlier hash
-commitment. Because Yjs syncs live, every peer can watch everyone else's salts
-arrive in real time before deciding whether to (re)contribute their own. A
-peer willing to wait until last, or to hit **Reroll** repeatedly while
-watching their own screen for a result they like, can steer the draw in a way
-a true commit-then-reveal protocol would prevent. This doesn't let anyone
-_force_ a specific outcome for someone else's screen (the seed is still a
-deterministic function of the salts, and every phone converges on the same
-result), but it does mean the draw is not rig-proof against a patient or
-motivated participant. Treat mesh-picker as "no single phone secretly
-controls the draw," not as a cryptographically-binding fair-RNG protocol.
 
 ## Quickstart
 
